@@ -18,6 +18,6 @@
     "url": "^0.11.1"
   },
   "dependencies": {
-    "@wllama/wllama": "^2.3.0"
+    "@wllama/wllama": "../wllama"
   }
 }

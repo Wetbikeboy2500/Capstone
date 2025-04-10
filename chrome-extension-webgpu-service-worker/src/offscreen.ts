@@ -9,7 +9,7 @@ let currentModelConfig: { n_ctx: number } | null = null;
 
 // GBNF grammar for JSON output formatting
 const jsonGrammar = `
-root ::= "\`\`\`json" ws "{" ws "\\"brief_analysis\\":" ws string "," ws "\\"type\\":" ws threat "," ws "\\"confidence\\":" ws confidence ws "}" ws "\`\`\`"
+root ::= "{" ws "\\"brief_analysis\\":" ws string "," ws "\\"type\\":" ws threat "," ws "\\"confidence\\":" ws confidence ws "}"
 
 threat ::= "\\"safe\\"" | "\\"spam\\"" | "\\"unknown_threat\\"" | "\\"malware\\"" | "\\"data_exfiltration\\"" | "\\"phishing\\"" | "\\"scam\\"" | "\\"extortion\\"" 
 
@@ -48,7 +48,6 @@ const progressCallback = ({ loaded, total }: ProgressInput) => {
  * Determines optimal model and parameters based on system resources
  */
 async function getOptimalModelConfig() {
-  // Default configuration for low-end devices
   let modelConfig = {
     modelName: 'gemma-3-4b-it-qat-q4_0-gguf',
     modelUrl: gemma3_4b,
@@ -58,16 +57,12 @@ async function getOptimalModelConfig() {
   };
 
   try {
-    // Request memory info
-    // @ts-ignore - Using Chrome extension API not in TypeScript defs
-    const memoryInfo = await chrome.system.memory.getInfo();
-    const availableRAMMB = memoryInfo.availableCapacity / (1024 * 1024);
-    const totalRAMMB = memoryInfo.capacity / (1024 * 1024);
-
-    // Request CPU info
-    // @ts-ignore - Using Chrome extension API not in TypeScript defs
-    const cpuInfo = await chrome.system.cpu.getInfo();
-    const cpuThreads = cpuInfo.numOfProcessors || 4;
+    // Request system information from background script
+    const systemInfo = await chrome.runtime.sendMessage({ type: 'getSystemInfo' });
+    const availableRAMMB = systemInfo.availableRAMMB;
+    const totalRAMMB = systemInfo.totalRAMMB;
+    // Use hardwareConcurrency instead of cpuThreads for better thread allocation
+    const cpuThreads = systemInfo.hardwareConcurrency || systemInfo.cpuThreads;
 
     console.log(
       `System resources: ${cpuThreads} CPU threads, ${(availableRAMMB / 1024).toFixed(1)}GB available RAM of ${(
@@ -75,12 +70,12 @@ async function getOptimalModelConfig() {
       ).toFixed(1)}GB total`
     );
 
-    // Same model selection logic as before...
+    // Same model selection logic as before but with more aggressive thread allocation
     if (availableRAMMB >= 6000) {
       modelConfig = {
         modelName: 'gemma-3-4b-it-qat-q4_0-gguf',
         modelUrl: gemma3_4b,
-        n_threads: Math.min(Math.max(2, Math.floor(cpuThreads * 0.5)), 6),
+        n_threads: Math.max(2, Math.floor(cpuThreads * 0.75)),
         n_ctx: Math.min(8192, Math.max(2048, Math.floor((availableRAMMB * 0.7 - 2360) / 0.5 / 512) * 512)),
         n_batch: Math.min(512, Math.max(256, Math.floor(modelConfig.n_ctx / 16))),
       };
@@ -88,18 +83,14 @@ async function getOptimalModelConfig() {
       modelConfig = {
         modelName: 'gemma-3-1b-it-qat-q4_0-gguf',
         modelUrl: gemma3_1b,
-        n_threads: Math.min(Math.max(2, Math.floor(cpuThreads * 0.75)), 8),
+        n_threads: Math.max(2, Math.floor(cpuThreads * 0.75)),
         n_ctx: Math.min(8192, Math.max(2048, Math.floor((availableRAMMB * 0.7 - 720) / 0.15 / 512) * 512)),
         n_batch: Math.min(512, Math.max(256, Math.floor(modelConfig.n_ctx / 16))),
       };
     }
-
-    console.log(
-      `Selected ${modelConfig.modelName} with: ${modelConfig.n_threads} threads, ${modelConfig.n_ctx} context window, ${modelConfig.n_batch} batch size`
-    );
   } catch (error) {
-    console.warn('Error accessing system resources:', error);
-    console.log('Using fallback configuration');
+    console.error('Error getting system info:', error);
+    // Fall through to use default values if we can't get system info
   }
 
   return modelConfig;

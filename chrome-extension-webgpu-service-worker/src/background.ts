@@ -177,6 +177,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   
+  // Handle system info request from offscreen document
+  if (message.type === 'getSystemInfo') {
+    console.log('ServiceWorker: Getting system info for offscreen document');
+    
+    // Create a Promise to handle the async APIs
+    const getSystemInfoPromise = new Promise((resolve) => {
+      chrome.system.memory.getInfo((memoryInfo) => {
+        chrome.system.cpu.getInfo((cpuInfo) => {
+          resolve({
+            availableRAMMB: Math.floor(memoryInfo.availableCapacity / (1024 * 1024)),
+            totalRAMMB: Math.floor(memoryInfo.capacity / (1024 * 1024)),
+            cpuThreads: cpuInfo.numOfProcessors,
+            hardwareConcurrency: navigator.hardwareConcurrency || cpuInfo.numOfProcessors
+          });
+        });
+      });
+    });
+    
+    // Return the system info
+    getSystemInfoPromise.then((systemInfo) => {
+      sendResponse(systemInfo);
+    });
+    
+    return true; // Indicate we'll respond asynchronously
+  }
+  
   return false;
 });
 
