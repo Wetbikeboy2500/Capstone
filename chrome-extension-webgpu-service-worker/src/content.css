@@ -1,5 +1,67 @@
 /* Email Safety Badge - Minimal CSS for Gmail content script */
 
+/* Base Font Awesome icon styles */
+.fa {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  text-align: center;
+  font-style: normal;
+  line-height: 1;
+  font-size: 15px; /* Increase icon size to 15px */
+  color: black; /* Set all icons to black by default */
+}
+
+/* Check icon (for safe) */
+.fa-check:before {
+  content: "\2713"; /* Unicode checkmark */
+}
+
+/* Trash icon (for spam) */
+.fa-trash:before {
+  content: "\1F5D1"; /* Unicode trash bin */
+}
+
+/* Exclamation icon (for unknown_threat) */
+.fa-exclamation:before {
+  content: "!";
+  font-weight: bold;
+}
+
+/* Unlock icon (for malware) */
+.fa-unlock:before {
+  content: "\1F513"; /* Unicode unlock */
+}
+
+/* File arrow up icon (for data_exfiltration) */
+.fa-file-arrow-up:before {
+  content: "\2191"; /* Unicode up arrow */
+}
+
+/* Fish icon (for phishing) */
+.fa-fish:before {
+  content: "\1F41F"; /* Unicode fish */
+}
+
+/* User secret icon (for extortion) */
+.fa-user-secret:before {
+  content: "\1F575"; /* Unicode detective/spy */
+}
+
+/* Dollar sign icon (for scam) */
+.fa-dollar-sign:before {
+  content: "$";
+  font-weight: bold;
+}
+
+/* Question icon (for unknown) */
+.fa-question:before {
+  content: "?";
+  font-weight: bold;
+}
+
 /* Badge icon styling */
 .email-safety-badge {
   display: inline-flex;
@@ -27,27 +89,31 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  box-sizing: content-box; /* Ensure padding and border are not included in width/height */
+  box-sizing: border-box; /* Include padding in the element's dimensions */
+}
+
+/* Override the color for the badge icons to be black, regardless of badge color */
+.badge-icon i {
+  color: black;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
 }
 
 /* Badge colors */
 .badge-icon.green {
   background-color: green;
-  color: white;
 }
 
 .badge-icon.yellow {
   background-color: yellow;
-  color: #3c4043; /* Dark text for better visibility on yellow */
-}
-
-.badge-icon.yellow i {
-  color: #3c4043; /* Dark icon for better visibility on yellow */
 }
 
 .badge-icon.red {
   background-color: red;
-  color: white;
 }
 
 /* Loading animation for the badge while analyzing */
