@@ -9,7 +9,7 @@
     "esModuleInterop": true,
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "jsx": "preserve",
-    "types": ["chrome", "node", "@webgpu/types"],
+    "types": ["chrome", "node"],
     "outDir": "./dist",
     "rootDir": "./src",
     "baseUrl": ".",

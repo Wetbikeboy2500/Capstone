@@ -9,7 +9,8 @@
     "scripting",
     "system.cpu",
     "system.memory",
-    "webRequest"
+    "webRequest",
+    "offscreen"
   ],
   "host_permissions": [
     "*://mail.google.com/*"
@@ -44,7 +45,9 @@
     "resources": [
       "models/*",
       "models/single-thread/*",
-      "models/multi-thread/*"
+      "models/multi-thread/*",
+      "offscreen.html",
+      "offscreen.js"
     ],
     "matches": ["*://mail.google.com/*"]
   }],
