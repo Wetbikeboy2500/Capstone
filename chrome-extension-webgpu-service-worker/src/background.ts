@@ -1,6 +1,6 @@
 /// <reference types="@webgpu/types" />
 import { Wllama } from '@wllama/wllama';
-import { ProgressInput, RequestMessage, AnalysisResult, newResponseMessage } from './types';
+import { AnalysisResult, newResponseMessage, ProgressInput, RequestMessage } from './types';
 
 // Define wllama instance and handler
 let wllama: Wllama | undefined;
@@ -28,9 +28,12 @@ ws      ::= [ \\t\\n]*
 
 // Configuration for wllama
 const CONFIG_PATHS = {
-  'single-thread/wllama.wasm': chrome.runtime.getURL('wllama/single-thread/wllama.wasm'),
-  'multi-thread/wllama.wasm': chrome.runtime.getURL('wllama/multi-thread/wllama.wasm'),
+  'single-thread/wllama.wasm': chrome.runtime.getURL('models/single-thread/wllama.wasm'),
+  'multi-thread/wllama.wasm': chrome.runtime.getURL('models/multi-thread/wllama.wasm'),
 };
+
+const gemma3_1b = chrome.runtime.getURL('models/gemma-3-1b-it-q4_0_s-00001-of-00002.gguf');
+const gemma3_4b = chrome.runtime.getURL('models/gemma-3-4b-it-q4_0_s-00001-of-00006.gguf');
 
 const progressCallback = ({ loaded, total }: ProgressInput) => {
    const progressPercentage = Math.round((loaded / total) * 100);
@@ -46,8 +49,8 @@ let loadingPromise: Promise<null> | null = null;
 async function getOptimalModelConfig() {
   // Default configuration for low-end devices
   let modelConfig = {
-    modelRepo: 'google/gemma3',
     modelName: 'gemma-3-4b-it-qat-q4_0-gguf',
+    modelUrl: gemma3_4b,
     n_threads: 4,
     n_ctx: 4096,
     n_batch: 512
@@ -78,6 +81,7 @@ async function getOptimalModelConfig() {
     let tokenMemoryRatio = 0;
     let maxContextWindow = 0;
     let modelName = '';
+    let modelUrl = '';
     
     if (availableRAMMB >= 6000) {  // At least 6GB available
       // 4B model
@@ -85,12 +89,14 @@ async function getOptimalModelConfig() {
       tokenMemoryRatio = 0.5;  // ~0.5MB per token for KV cache (simplified)
       maxContextWindow = 8192;
       modelName = 'gemma-3-4b-it-qat-q4_0-gguf';
+      modelUrl = gemma3_4b;
     } else {
       // 1B model
       modelSizeMB = 720;  // 720MB for 1B model
       tokenMemoryRatio = 0.15;  // ~0.15MB per token for KV cache (simplified)
       maxContextWindow = 8192;
       modelName = 'gemma-3-1b-it-qat-q4_0-gguf';
+      modelUrl = gemma3_1b;
     }
     
     // Reserve memory for browser and system overhead (30% of available)
@@ -127,15 +133,15 @@ async function getOptimalModelConfig() {
     );
     
     modelConfig = {
-      modelRepo: 'google/gemma3',
       modelName: modelName,
+      modelUrl: modelUrl,
       n_threads: optimalThreads,
       n_ctx: optimalContextSize,
       n_batch: optimalBatchSize
     };
     
     console.log(`Memory-based context calculation: ${memoryBasedContextSize} tokens (${kvCacheMemoryMB.toFixed(0)}MB KV cache memory)`);
-    console.log(`Selected ${modelConfig.modelName} with: ${modelConfig.n_threads} threads, ${modelConfig.n_ctx} context window, ${modelConfig.n_batch} batch size`);
+    console.log(`Selected ${modelConfig.modelName} with: ${modelConfig.modelUrl}, ${modelConfig.n_threads} threads, ${modelConfig.n_ctx} context window, ${modelConfig.n_batch} batch size`);
   } catch (error) {
     console.warn('Error accessing system resources:', error);
     console.log('Using fallback configuration for Gemma3 1B model');
@@ -163,6 +169,7 @@ async function initializeWllama(): Promise<void> {
           CONFIG_PATHS,
           {
             allowOffline: true,
+            parallelDownloads: 6,
           }
         );
 
@@ -170,15 +177,15 @@ async function initializeWllama(): Promise<void> {
         const modelConfig = await getOptimalModelConfig();
         currentModelConfig = modelConfig; // Store for later reference
     
-        console.log(`Loading model ${modelConfig.modelRepo}/${modelConfig.modelName} with parameters:`, { 
+        console.log(`Loading model ${modelConfig.modelName} with parameters:`, { 
           n_threads: modelConfig.n_threads, 
-          n_ctx: modelConfig.n_ctx, 
-          n_batch: modelConfig.n_batch 
+          n_ctx: modelConfig.n_ctx,
+          n_batch: modelConfig.n_batch,
+          modelUrl: modelConfig.modelUrl
         });
         
-        await wllama.loadModelFromHF(
-          modelConfig.modelRepo,
-          modelConfig.modelName,
+        await wllama.loadModelFromUrl(
+          modelConfig.modelUrl,
           {
             n_threads: modelConfig.n_threads,
             n_ctx: modelConfig.n_ctx,
