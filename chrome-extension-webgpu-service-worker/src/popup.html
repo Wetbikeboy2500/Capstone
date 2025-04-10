@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <title>Email Security Scanner</title>
     <link rel="stylesheet" href="popup.css">
+    <link rel="stylesheet" href="content.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   </head>
   <body>
@@ -17,10 +18,22 @@
       <h3>Security Indicators</h3>
       
       <div class="badge-section">
+        <h4>Loading</h4>
+        <div class="badge-item">
+          <div class="email-safety-badge loading">
+            <div class="badge-icon"></div>
+          </div>
+          <span>Loading - Email analysis in progress</span>
+        </div>
+      </div>
+      
+      <div class="badge-section">
         <h4>Green (Safe)</h4>
         <div class="badge-item">
-          <div class="icon-circle green">
-            <i class="fa fa-check"></i>
+          <div class="email-safety-badge">
+            <div class="badge-icon green">
+              <i class="fa fa-check"></i>
+            </div>
           </div>
           <span>Safe - Normal email verified as legitimate</span>
         </div>
@@ -29,14 +42,18 @@
       <div class="badge-section">
         <h4>Yellow (Caution)</h4>
         <div class="badge-item">
-          <div class="icon-circle yellow">
-            <i class="fa fa-trash"></i>
+          <div class="email-safety-badge">
+            <div class="badge-icon yellow">
+              <i class="fa fa-trash"></i>
+            </div>
           </div>
           <span>Spam - Unwanted or commercial bulk email</span>
         </div>
         <div class="badge-item">
-          <div class="icon-circle yellow">
-            <i class="fa fa-exclamation"></i>
+          <div class="email-safety-badge">
+            <div class="badge-icon yellow">
+              <i class="fa fa-exclamation"></i>
+            </div>
           </div>
           <span>Unknown Threat - Suspicious patterns detected</span>
         </div>
@@ -45,32 +62,42 @@
       <div class="badge-section">
         <h4>Red (High Risk)</h4>
         <div class="badge-item">
-          <div class="icon-circle red">
-            <i class="fa fa-unlock"></i>
+          <div class="email-safety-badge">
+            <div class="badge-icon red">
+              <i class="fa fa-unlock"></i>
+            </div>
           </div>
           <span>Malware - Contains malicious attachments/links</span>
         </div>
         <div class="badge-item">
-          <div class="icon-circle red">
-            <i class="fa fa-file-arrow-up"></i>
+          <div class="email-safety-badge">
+            <div class="badge-icon red">
+              <i class="fa fa-file-arrow-up"></i>
+            </div>
           </div>
           <span>Data Exfiltration - Attempts to extract sensitive data</span>
         </div>
         <div class="badge-item">
-          <div class="icon-circle red">
-            <i class="fa fa-fish"></i>
+          <div class="email-safety-badge">
+            <div class="badge-icon red">
+              <i class="fa fa-fish"></i>
+            </div>
           </div>
           <span>Phishing - Mimics legitimate services</span>
         </div>
         <div class="badge-item">
-          <div class="icon-circle red">
-            <i class="fa fa-user-secret"></i>
+          <div class="email-safety-badge">
+            <div class="badge-icon red">
+              <i class="fa fa-user-secret"></i>
+            </div>
           </div>
           <span>Extortion - Threatens to release data for payment</span>
         </div>
         <div class="badge-item">
-          <div class="icon-circle red">
-            <i class="fa fa-dollar-sign"></i>
+          <div class="email-safety-badge">
+            <div class="badge-icon red">
+              <i class="fa fa-dollar-sign"></i>
+            </div>
           </div>
           <span>Scam - Deceptive schemes for information/money</span>
         </div>

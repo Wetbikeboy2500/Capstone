@@ -4,14 +4,20 @@
 .email-safety-badge {
   display: inline-flex;
   align-items: center;
-  padding: 4px 8px;
-  border-radius: 16px;
-  margin: 4px;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 50%;
   font-size: 12px;
   background-color: #f8f9fa;
   border: 1px solid #dadce0;
   position: relative;
   cursor: pointer;
+  width: 20px;
+  height: 20px;
+  min-width: 20px; /* Ensure minimum width */
+  min-height: 20px; /* Ensure minimum height */
+  box-sizing: content-box; /* Ensure padding and border are not included in width/height */
+  transform: translateY(-5px); /* Move badge up to align with 20px elements */
 }
 
 .badge-icon {
@@ -21,6 +27,7 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
+  box-sizing: content-box; /* Ensure padding and border are not included in width/height */
 }
 
 /* Badge colors */
@@ -44,15 +51,22 @@
 }
 
 /* Loading animation for the badge while analyzing */
-.email-safety-badge.loading .badge-icon {
+.email-safety-badge.loading .badge-icon,
+.icon-circle.loading {
   background-color: #ccc;
   animation: pulse 1.5s infinite;
 }
 
 @keyframes pulse {
-  0% { opacity: 0.5; }
-  50% { opacity: 1; }
-  100% { opacity: 0.5; }
+  0% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.5;
+  }
 }
 
 /* Badge info popup */
@@ -67,7 +81,7 @@
   border-radius: 4px;
   padding: 8px;
   margin-top: 4px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   z-index: 1000;
   white-space: nowrap;
   min-width: 150px;
@@ -97,6 +111,18 @@
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.badge-cell {
+  vertical-align: top;
+  padding-left: 10px;
+  padding-top: 0;
 }

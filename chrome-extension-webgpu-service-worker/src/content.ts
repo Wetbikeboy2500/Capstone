@@ -1,6 +1,6 @@
-import { sendEmailContent, clearMessageHandlers } from './messageQueue';
+import { clearAnalyzedEmails, getAnalyzedEmail, storeAnalyzedEmail } from './db';
+import { clearMessageHandlers, sendEmailContent } from './messageQueue';
 import { AnalysisResult, EmailContent, newAnalysisResult, ResponseMessage } from './types';
-import { getAnalyzedEmail, storeAnalyzedEmail, clearAnalyzedEmails } from './db';
 
 // Keep WeakSets for processed elements and badge elements
 let processedElements = new WeakSet<Element>();
@@ -13,20 +13,22 @@ let throttleTimer: number | null = null;
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'clearCache') {
     // Remove existing badges
-    document.querySelectorAll('.email-safety-badge').forEach(badge => {
+    document.querySelectorAll('.email-safety-badge').forEach((badge) => {
       badge.remove();
     });
 
-    clearAnalyzedEmails().then(() => {
-      processedElements = new WeakSet<Element>();
-      badgeElements = new WeakSet<Element>();
-      clearMessageHandlers();
-      console.log('Email Safety Scanner: Cache and badges cleared');
-      sendResponse({ success: true });
-    }).catch(error => {
-      console.error('Error clearing cache:', error);
-      sendResponse({ success: false, error });
-    });
+    clearAnalyzedEmails()
+      .then(() => {
+        processedElements = new WeakSet<Element>();
+        badgeElements = new WeakSet<Element>();
+        clearMessageHandlers();
+        console.log('Email Safety Scanner: Cache and badges cleared');
+        sendResponse({ success: true });
+      })
+      .catch((error) => {
+        console.error('Error clearing cache:', error);
+        sendResponse({ success: false, error });
+      });
     return true; // Indicates async response
   }
 });
@@ -52,14 +54,14 @@ function initializeObserver(): void {
 
   observer.observe(document.body, {
     childList: true,
-    subtree: true
+    subtree: true,
   });
 }
 
 async function handleEmailChanges(): Promise<void> {
   try {
     const emailContainers = document.querySelectorAll('div.adn.ads');
-    
+
     for (const container of emailContainers) {
       if (processedElements.has(container)) continue;
 
@@ -74,7 +76,7 @@ async function handleEmailChanges(): Promise<void> {
 
       const hash = await hashContent(JSON.stringify(emailContent));
       const storedResult = await getAnalyzedEmail(hash);
-      
+
       if (storedResult) {
         displayBadge(container as HTMLElement, storedResult);
         continue;
@@ -87,13 +89,30 @@ async function handleEmailChanges(): Promise<void> {
   }
 }
 
+/**
+ * Trims excessive whitespace from text content
+ * - Replaces multiple spaces with a single space
+ * - Replaces 3+ newlines with double newlines
+ * - Trims leading/trailing whitespace
+ */
+function normalizeWhitespace(text: string): string {
+  if (!text) return '';
+
+  return text
+    .replace(/[ \t]+/g, ' ') // Replace multiple spaces/tabs with single space
+    .replace(/\n{3,}/g, '\n\n') // Replace 3+ consecutive newlines with just 2
+    .replace(/[ \t]+\n/g, '\n') // Remove spaces before newlines
+    .replace(/\n[ \t]+/g, '\n') // Remove spaces after newlines
+    .trim(); // Remove leading/trailing whitespace
+}
+
 function extractEmailContent(container: HTMLElement): EmailContent | null {
   const subject = container.querySelector('h2.hP')?.textContent ?? '';
   const body = container.querySelector('div.a3s.aiL')?.textContent ?? '';
   const sender = container.querySelector('span.gD')?.getAttribute('email') ?? '';
-  const urls = Array.from(container.querySelectorAll('a')).map(a => a.href);
+  const urls = Array.from(container.querySelectorAll('a')).map((a) => a.href);
 
-  return { subject, body, sender, urls };
+  return { subject, body: normalizeWhitespace(body), sender, urls };
 }
 
 async function hashContent(content: string): Promise<string> {
@@ -101,7 +120,7 @@ async function hashContent(content: string): Promise<string> {
   const data = encoder.encode(content);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 function analyzeEmail(emailContent: EmailContent, container: HTMLElement, hash: string): void {
@@ -117,48 +136,75 @@ function analyzeEmail(emailContent: EmailContent, container: HTMLElement, hash: 
       const analysisResult = newAnalysisResult({
         brief_analysis: response.brief_analysis,
         type: response.type,
-        confidence: response.confidence
+        confidence: response.confidence,
       });
-      
+
       // Store in IndexedDB instead of in-memory Map
-      storeAnalyzedEmail(hash, analysisResult).then(() => {
-        displayBadge(container, analysisResult);
-      }).catch(error => {
-        console.error('Failed to store analysis result:', error);
-        // Still display badge even if storage fails
-        displayBadge(container, analysisResult);
-      });
+      storeAnalyzedEmail(hash, analysisResult)
+        .then(() => {
+          displayBadge(container, analysisResult);
+        })
+        .catch((error) => {
+          console.error('Failed to store analysis result:', error);
+          // Still display badge even if storage fails
+          displayBadge(container, analysisResult);
+        });
     }
   });
 }
 
-function addLoadingBadge(container: HTMLElement): void {
-  const loadingBadge = document.createElement('div');
-  loadingBadge.className = 'email-safety-badge loading';
-  
-  const badgeIcon = document.createElement('div');
-  badgeIcon.className = 'badge-icon';
-  
-  const spinner = document.createElement('i');
-  spinner.className = 'fa fa-spinner fa-spin';
-  
-  badgeIcon.appendChild(spinner);
-  loadingBadge.appendChild(badgeIcon);
-  
-  const subjectLine = container.querySelector('h2.hP');
-  if (subjectLine) {
-    if (subjectLine.querySelector('.email-safety-badge')) return;
-    subjectLine.insertBefore(loadingBadge, subjectLine.firstChild);
-  }
-}
-
-function displayBadge(container: HTMLElement, result: AnalysisResult): void {
+function addBadgeToEmail(container: HTMLElement, badge: HTMLElement): void {
+  // Remove any existing badge first
   const existingBadge = container.querySelector('.email-safety-badge');
   if (existingBadge) {
     badgeElements.delete(existingBadge);
     existingBadge.remove();
   }
+  
+  // Find the first table row in the email container
+  const firstRow = container.querySelector('tr');
+  if (firstRow) {
+    // Create a new table cell for the badge if needed
+    let badgeCell = firstRow.querySelector('.badge-cell');
+    if (!badgeCell) {
+      badgeCell = document.createElement('td');
+      badgeCell.className = 'badge-cell';
+      firstRow.appendChild(badgeCell);
+    }
+    
+    // Add the badge to the cell
+    badgeCell.innerHTML = '';
+    badgeCell.appendChild(badge);
+  } else {
+    // Fallback to previous approach if no table row found
+    const toolbar = container.querySelector('.ade');
+    if (toolbar) {
+      toolbar.appendChild(badge);
+    } else {
+      const headerArea = container.querySelector('.ha');
+      if (headerArea) {
+        headerArea.appendChild(badge);
+      }
+    }
+  }
+}
 
+function addLoadingBadge(container: HTMLElement): void {
+  console.log('add loading badge')
+
+  const loadingBadge = document.createElement('div');
+  loadingBadge.className = 'email-safety-badge loading';
+
+  const badgeIcon = document.createElement('div');
+  badgeIcon.className = 'badge-icon';
+
+  loadingBadge.appendChild(badgeIcon);
+
+  // Add badge to email (existing badges will be handled by addBadgeToEmail)
+  addBadgeToEmail(container, loadingBadge);
+}
+
+function displayBadge(container: HTMLElement, result: AnalysisResult): void {
   const badge = document.createElement('div');
   badge.className = 'email-safety-badge';
   badgeElements.add(badge);
@@ -209,42 +255,37 @@ function displayBadge(container: HTMLElement, result: AnalysisResult): void {
   // Create badge icon
   const badgeIcon = document.createElement('div');
   badgeIcon.className = `badge-icon ${color}`;
-  
+
   const iconElement = document.createElement('i');
   iconElement.className = `fa ${icon}`;
-  
+
   badgeIcon.appendChild(iconElement);
   badge.appendChild(badgeIcon);
-  
+
   // Create badge info container
   const badgeInfo = document.createElement('div');
   badgeInfo.className = 'badge-info';
-  
+
   // Add badge type
   const badgeType = document.createElement('span');
   badgeType.className = 'badge-type';
   badgeType.textContent = result.type || 'Normal';
   badgeInfo.appendChild(badgeType);
-  
+
   // Add badge analysis
   const badgeAnalysis = document.createElement('span');
   badgeAnalysis.className = 'badge-analysis';
   badgeAnalysis.textContent = result.brief_analysis;
   badgeInfo.appendChild(badgeAnalysis);
-  
+
   // Add badge confidence
   const badgeConfidence = document.createElement('span');
   badgeConfidence.className = 'badge-confidence';
   badgeConfidence.textContent = `Confidence: ${Math.round(result.confidence * 100)}%`;
   badgeInfo.appendChild(badgeConfidence);
-  
+
   badge.appendChild(badgeInfo);
 
-  // Insert badge at the start of the email subject line
-  const subjectLine = container.querySelector('h2.hP');
-  if (subjectLine) {
-    //Remove existing badge if present
-    subjectLine.querySelector('.email-safety-badge')?.remove();
-    subjectLine.insertBefore(badge, subjectLine.firstChild);
-  }
+  // Add badge to email
+  addBadgeToEmail(container, badge);
 }
