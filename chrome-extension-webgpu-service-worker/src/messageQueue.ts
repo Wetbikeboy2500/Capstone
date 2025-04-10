@@ -1,4 +1,4 @@
-import { EmailContent, RequestMessage, ResponseMessage, AnalysisResult, newRequestMessage } from './types';
+import { EmailContent, newRequestMessage, RequestMessage, ResponseMessage } from './types';
 
 // Define type for port connection
 let port: chrome.runtime.Port | null = null;
@@ -38,6 +38,8 @@ function connectToServiceWorker() {
         handler(message);
         messageHandlers.delete(message.requestId);
         
+        // Mark queue as not processing before handling next item
+        isProcessingQueue = false;
         // Process next item in queue if available
         setTimeout(processNextQueueItem, 0);
       }
@@ -48,6 +50,8 @@ function connectToServiceWorker() {
         handler(message);
         messageHandlers.delete(message.requestId);
         
+        // Mark queue as not processing before handling next item
+        isProcessingQueue = false;
         // Process next item in queue if available
         setTimeout(processNextQueueItem, 0);
       }
@@ -57,6 +61,7 @@ function connectToServiceWorker() {
   port.onDisconnect.addListener(() => {
     console.log('Disconnected from service worker, attempting to reconnect...');
     port = null;
+    isProcessingQueue = false; // Reset processing flag on disconnect
     setTimeout(connectToServiceWorker, 1000);
   });
 }
