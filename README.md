@@ -10,3 +10,5 @@ Determine if an email is a malicious through a locally running LLM in a Chromium
 - [] Track performance from loading to displaying badge
 - [] Make logging optional for debugging
 - [] Prebundle all needed resources
+- [] Unload the model after X amount of time passes
+- [] Allow port connections to be re-established

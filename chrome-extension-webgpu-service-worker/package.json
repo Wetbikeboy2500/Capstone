@@ -4,7 +4,7 @@
   "description": "",
   "private": true,
   "scripts": {
-    "build": "parcel build src/manifest.json --config @parcel/config-webextension"
+    "build": "cp ../wllama/esm/multi-thread/wllama.wasm src/models/multi-thread/wllama.wasm && cp ../wllama/esm/single-thread/wllama.wasm src/models/single-thread/wllama.wasm && parcel build src/manifest.json --config @parcel/config-webextension"
   },
   "author": "",
   "license": "ISC",

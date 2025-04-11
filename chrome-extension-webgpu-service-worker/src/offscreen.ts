@@ -1,11 +1,12 @@
 import { Wllama } from '@wllama/wllama';
-import { AnalysisResult, ProgressInput, RequestMessage } from './types';
+import { AnalysisResult, ProgressInput, RequestMessage, SYSTEM_PROMPT } from './types';
 
 // WLLAMA STATE
 let wllama: Wllama | undefined;
 let isModelLoaded = false;
 let loadingPromise: Promise<null> | null = null;
 let currentModelConfig: { n_ctx: number } | null = null;
+let tokensToKeepForSystemPrompt = 0;
 
 // GBNF grammar for JSON output formatting
 const jsonGrammar = `
@@ -14,8 +15,8 @@ root ::= "{" ws "\\"brief_analysis\\":" ws string "," ws "\\"type\\":" ws threat
 threat ::= "\\"safe\\"" | "\\"spam\\"" | "\\"unknown_threat\\"" | "\\"malware\\"" | "\\"data_exfiltration\\"" | "\\"phishing\\"" | "\\"scam\\"" | "\\"extortion\\"" 
 
 confidence ::= "0" | "0." [0-9]+ | "1" | "1.0"
-string  ::= "\\"" ([^"\\\\] | "\\\\" ["\\\\bfnrt])* "\\""
-ws      ::= [ \\t\\n]*
+string  ::= "\\"" ([^"\\\\] | "\\\\" ["\\\\bfnrt]){1,50} "\\""
+ws      ::= [ \\t\\n]{0,2}
 `;
 
 // Configuration for wllama
@@ -24,7 +25,6 @@ const CONFIG_PATHS = {
   'multi-thread/wllama.wasm': chrome.runtime.getURL('models/multi-thread/wllama.wasm'),
 };
 
-const gemma3_1b = chrome.runtime.getURL('models/gemma-3-1b-it-q4_0_s-00001-of-00002.gguf');
 const gemma3_4b = chrome.runtime.getURL('models/gemma-3-4b-it-q4_0_s-00001-of-00006.gguf');
 
 const progressCallback = ({ loaded, total }: ProgressInput) => {
@@ -45,9 +45,10 @@ const progressCallback = ({ loaded, total }: ProgressInput) => {
 };
 
 /**
- * Determines optimal model and parameters based on system resources
+ * Determines optimal model parameters based on system resources
  */
 async function getOptimalModelConfig() {
+  // Set base configuration for the 4b model with safe defaults
   let modelConfig = {
     modelName: 'gemma-3-4b-it-qat-q4_0-gguf',
     modelUrl: gemma3_4b,
@@ -56,13 +57,23 @@ async function getOptimalModelConfig() {
     n_batch: 512,
   };
 
+  /**
+   * Returns a memory-aligned value that's close to the given number
+   * Uses multiples of 256 which align well with memory representations
+   */
+  function getMemoryAlignedValue(n: number): number {
+    // Use multiples of 256 for better memory alignment
+    const aligned = Math.round(n / 256) * 256;
+    // Ensure we have a valid positive number
+    return Math.max(256, aligned || 4096); // Default to 4096 if calculation results in 0 or null
+  }
+
   try {
     // Request system information from background script
     const systemInfo = await chrome.runtime.sendMessage({ type: 'getSystemInfo' });
-    const availableRAMMB = systemInfo.availableRAMMB;
-    const totalRAMMB = systemInfo.totalRAMMB;
-    // Use hardwareConcurrency instead of cpuThreads for better thread allocation
-    const cpuThreads = systemInfo.hardwareConcurrency || systemInfo.cpuThreads;
+    const availableRAMMB = systemInfo?.availableRAMMB || 8192; // Default to 8GB if null
+    const totalRAMMB = systemInfo?.totalRAMMB || 16384; // Default to 16GB if null
+    const cpuThreads = systemInfo?.hardwareConcurrency || systemInfo?.cpuThreads || 4; // Default to 4 if null
 
     console.log(
       `System resources: ${cpuThreads} CPU threads, ${(availableRAMMB / 1024).toFixed(1)}GB available RAM of ${(
@@ -70,24 +81,33 @@ async function getOptimalModelConfig() {
       ).toFixed(1)}GB total`
     );
 
-    // Same model selection logic as before but with more aggressive thread allocation
-    if (availableRAMMB >= 6000) {
-      modelConfig = {
-        modelName: 'gemma-3-4b-it-qat-q4_0-gguf',
-        modelUrl: gemma3_4b,
-        n_threads: Math.max(2, Math.floor(cpuThreads * 0.75)),
-        n_ctx: Math.min(8192, Math.max(2048, Math.floor((availableRAMMB * 0.7 - 2360) / 0.5 / 512) * 512)),
-        n_batch: Math.min(512, Math.max(256, Math.floor(modelConfig.n_ctx / 16))),
-      };
-    } else {
-      modelConfig = {
-        modelName: 'gemma-3-1b-it-qat-q4_0-gguf',
-        modelUrl: gemma3_1b,
-        n_threads: Math.max(2, Math.floor(cpuThreads * 0.75)),
-        n_ctx: Math.min(8192, Math.max(2048, Math.floor((availableRAMMB * 0.7 - 720) / 0.15 / 512) * 512)),
-        n_batch: Math.min(512, Math.max(256, Math.floor(modelConfig.n_ctx / 16))),
-      };
-    }
+    // Calculate context size based on available RAM with fallback values
+    // Formula: (available RAM * safety factor - model base size) / token memory cost
+    const baseModelSizeMB = 2360; // Base size of the 4b model in MB
+    const tokenMemoryCostMB = 0.5; // Approximate memory per token in MB
+    
+    // Calculate raw context size
+    const calculatedCtx = Math.floor((availableRAMMB * 0.7 - baseModelSizeMB) / tokenMemoryCostMB);
+    
+    // First apply memory alignment, then apply constraints
+    const alignedCtx = getMemoryAlignedValue(calculatedCtx);
+    const constrainedCtx = Math.min(8192, Math.max(2048, alignedCtx));
+    
+    // Calculate batch size - first raw value, then memory alignment
+    const rawBatchSize = Math.floor(constrainedCtx / 16);
+    const batchSize = getMemoryAlignedValue(rawBatchSize);
+    // Apply constraints after alignment
+    const constrainedBatchSize = Math.min(512, Math.max(256, batchSize));
+    
+    modelConfig = {
+      modelName: 'gemma-3-4b-it-qat-q4_0-gguf',
+      modelUrl: gemma3_4b,
+      n_threads: Math.max(2, Math.floor(cpuThreads * 0.75)),
+      n_ctx: constrainedCtx,
+      n_batch: constrainedBatchSize,
+    };
+    
+    console.log(`Selected context size: ${constrainedCtx}, batch size: ${constrainedBatchSize}`);
   } catch (error) {
     console.error('Error getting system info:', error);
     // Fall through to use default values if we can't get system info
@@ -114,6 +134,12 @@ async function initializeWllama(): Promise<void> {
         wllama = new Wllama(CONFIG_PATHS, {
           allowOffline: true,
           parallelDownloads: 6,
+          logger: {
+            debug: (msg: string) => console.log('Offscreen: Wllama debug:', msg),
+            log: (msg: string) => console.log('Offscreen: Wllama info:', msg),
+            warn: (msg: string) => console.warn('Offscreen: Wllama warn:', msg),
+            error: (msg: string) => console.error('Offscreen: Wllama error:', msg),
+          }
         });
 
         // Get optimal model configuration
@@ -143,6 +169,7 @@ async function initializeWllama(): Promise<void> {
 
     await loadingPromise;
     isModelLoaded = true;
+    tokensToKeepForSystemPrompt = await getTokenCount(SYSTEM_PROMPT);
     console.log('Offscreen: Wllama initialized');
 
     // Notify service worker that model is ready
@@ -171,28 +198,8 @@ async function getTokenCount(text: string): Promise<number> {
     throw new Error('Model not loaded');
   }
 
-  let tokenCount = 0;
-
-  try {
-    const tokens = await wllama.tokenize(text);
-    return tokens.length;
-  } catch (error) {
-    console.error('Offscreen: Error tokenizing input:', error);
-    console.log('Offscreen: Attempting to tokenize in chunks');
-    const chunkSize = 100;
-    const chunks = text.match(new RegExp(`(.|\\s){1,${chunkSize}}`, 'g')) || [];
-    for (const chunk of chunks) {
-      try {
-        console.log(chunk);
-        const tokens = await wllama.tokenize(chunk);
-        tokenCount += tokens.length;
-      } catch (error) {
-        console.error('Offscreen: Error tokenizing chunk:', error);
-      }
-    }
-  }
-
-  return tokenCount;
+  const tokens = await wllama.tokenize(text, false);
+  return tokens.length;
 }
 
 /**
@@ -226,14 +233,19 @@ async function processInference(request: RequestMessage): Promise<any> {
         };
       }
 
+      console.log('Offscreen: Starting inference');
+      let start = new Date();
+
+      const prompt = await wllama.formatChat([
+        {
+          role: 'user',
+          content: request.prompt,
+        },
+      ], true);
+
       // Use createCompletion with the prompt
-      const completion = await wllama!.createChatCompletion(
-        [
-          {
-            role: 'user',
-            content: request.prompt,
-          },
-        ],
+      const completion = await wllama!.createCompletion(
+        prompt,
         {
           sampling: {
             temp: 1.0,
@@ -242,11 +254,18 @@ async function processInference(request: RequestMessage): Promise<any> {
             min_p: 0.01,
             grammar: jsonGrammar,
           },
+          useCache: true,
           onNewToken: (...args) => {
-            console.log('Offscreen: New token:', args);
+            console.log('Offscreen: Time to token:', new Date().getTime() - start.getTime(), 'ms', args);
+            start = new Date();
           },
         }
       );
+
+      //Keep the main system prompt. This is not exact and just removes some of the looping needed by wllama
+      wllama.kvRemove(tokensToKeepForSystemPrompt, -1);
+
+      console.log('Offscreen: Inference completed', completion);
 
       return JSON.parse(completion) as AnalysisResult;
     } catch (error) {
