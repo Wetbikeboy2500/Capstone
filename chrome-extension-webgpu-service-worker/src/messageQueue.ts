@@ -69,6 +69,7 @@ function generateRequestId(): string {
 }
 
 function createPromptFromEmail(email: EmailContent): string {
+  const urlsString = email.urls.length > 0 ? email.urls.join(', ') : 'None';
   // Gemma requires a combined prompt with system and user instructions together
   return `${SYSTEM_PROMPT}
 
@@ -76,7 +77,7 @@ Now analyze the security profile of this email:
 Subject: ${email.subject}
 From: ${email.sender}
 Body: ${email.body}
-URLs: ${email.urls.join(', ')}`;
+URLs: ${urlsString}`;
 }
 
 function processNextQueueItem() {

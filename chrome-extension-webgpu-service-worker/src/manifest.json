@@ -5,6 +5,7 @@
   "description": "Analyzes emails for security threats using WebGPU-accelerated LLMs",
   "permissions": [
     "activeTab",
+    "tabs",
     "storage",
     "scripting",
     "system.cpu",

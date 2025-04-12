@@ -25,7 +25,7 @@ const CONFIG_PATHS = {
   'multi-thread/wllama.wasm': chrome.runtime.getURL('models/multi-thread/wllama.wasm'),
 };
 
-const gemma3_4b = chrome.runtime.getURL('models/gemma-3-4b-it-q4_0_s-00001-of-00006.gguf');
+const gemma3_4b = chrome.runtime.getURL('models/gemma-3-4b-it-q4_0_s-00001-of-00003.gguf');
 
 const progressCallback = ({ loaded, total }: ProgressInput) => {
   // Ensure we have valid numbers to prevent null or NaN percentages
@@ -344,9 +344,4 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch((error) => sendResponse({ success: false, error: String(error) }));
     return true; // Indicate async response
   }
-});
-
-// Begin initialization when the document loads
-document.addEventListener('DOMContentLoaded', () => {
-  console.log('Offscreen document loaded');
 });

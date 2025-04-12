@@ -26,26 +26,18 @@ export function newResponseMessage(args: ResponseMessage): ResponseMessage {
 
 export interface AnalysisResult {
   brief_analysis: string;
-  type: 'safe' | 'spam' | 'unknown_threat' | 'malware' | 'data_exfiltration' | 'phishing' | 'scam' | 'extortion';
+  type: 'safe' | 'spam' | 'unknown_threat' | 'malware' | 'data_exfiltration' | 'phishing' | 'scam' | 'extortion' | 'error';
   confidence: number;
 }
 
 // System prompt to include with requests
-export const SYSTEM_PROMPT = `Evaluate email security risks based on content analysis.
+export const SYSTEM_PROMPT = `Analyze email content (subject, body, sender, URLs) for security risks.
+Output JSON containing:
+1. brief_analysis: Concise reason for classification (max 75 chars).
+2. type: One of 'safe', 'spam', 'unknown_threat', 'malware', 'data_exfiltration', 'phishing', 'scam', 'extortion'.
+3. confidence: Score from 0.00 to 0.99.
 
-INSTRUCTIONS:
-1. Review the email's subject, body, sender, and URLs
-2. Assess for potential security concerns
-3. Provide brief reasoning (1-75 chars)
-4. Classify as one of: safe, spam, unknown_threat, malware, data_exfiltration, phishing, scam, or extortion
-5. Include confidence score (0-0.99)
-
-RESPONSE FORMAT (JSON only):
-{
-  "brief_analysis": "Concise analysis",
-  "type": "safe|spam|unknown_threat|malware|data_exfiltration|phishing|scam|extortion",
-  "confidence": 0.XX
-}`;
+Required JSON format: {"brief_analysis": "...", "type": "...", "confidence": 0.XX}`;
 
 export function newAnalysisResult(args: AnalysisResult): AnalysisResult {
   return { ...args };

@@ -1,4 +1,4 @@
-import { newResponseMessage, RequestMessage } from './types';
+import { newResponseMessage, RequestMessage, ResponseMessage } from './types';
 
 // State management
 let isProcessing = false;
@@ -15,6 +15,50 @@ let offscreenDocumentCreating = false;
 
 let cleanupTimer: NodeJS.Timeout | null = null;
 const CLEANUP_DELAY = 60000; // 1 minute
+
+// Memory polling configuration
+let memoryPollingTimer: NodeJS.Timeout | null = null;
+const MEMORY_POLLING_INTERVAL = 5000; // 5 seconds
+
+/**
+ * Controls the action button's state based on the current tab URL
+ * Only enables the action button on mail.google.com
+ */
+function updateActionState(tabId: number, url?: string) {
+  if (!url) return;
+  
+  try {
+    // Parse the URL to get the hostname
+    const parsedUrl = new URL(url);
+    
+    if (parsedUrl.hostname === 'mail.google.com') {
+      chrome.action.enable(tabId);
+    } else {
+      chrome.action.disable(tabId);
+    }
+  } catch (e) {
+    // If URL parsing fails, disable the action button
+    chrome.action.disable(tabId);
+    console.error('Failed to parse URL:', url, e);
+  }
+}
+
+// Listen for tab updates to control the action button visibility
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  // Only run when the page is fully loaded
+  if (changeInfo.status === 'complete' && tab.url) {
+    updateActionState(tabId, tab.url);
+  }
+});
+
+// Also handle when tabs are activated (switched to)
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  chrome.tabs.get(activeInfo.tabId, (tab) => {
+    if (tab.url) {
+      updateActionState(activeInfo.tabId, tab.url);
+    }
+  });
+});
 
 /**
  * Checks if an offscreen document already exists
@@ -141,6 +185,12 @@ async function processRequest(message: RequestMessage, port: chrome.runtime.Port
     }
     
     // Send the inference request to the offscreen document
+    // Prevent cleanup while waiting for response
+    if (cleanupTimer) {
+      clearTimeout(cleanupTimer);
+      cleanupTimer = null;
+    }
+    
     const response = await chrome.runtime.sendMessage({
       type: 'inference',
       request: message
@@ -162,18 +212,15 @@ async function processRequest(message: RequestMessage, port: chrome.runtime.Port
 }
 
 function sendInsufficientResourcesError(port: chrome.runtime.Port, requestId: string) {
-  const memoryMessage = requiredRAMMB && availableRAMMB
-    ? `Required: ${requiredRAMMB}MB, Available: ${availableRAMMB}MB`
-    : 'Insufficient system memory';
-    
-  port.postMessage({
+  const result: ResponseMessage = newResponseMessage({
     responseType: 'error',
-    error: `Insufficient system resources to run the model. ${memoryMessage}`,
     requestId: requestId,
     brief_analysis: 'Cannot process request due to insufficient system resources',
     type: 'unknown_threat',
     confidence: 0
   });
+    
+  port.postMessage(result);
 }
 
 function sendErrorResponse(port: chrome.runtime.Port, requestId: string, error: unknown) {
@@ -206,6 +253,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     requiredRAMMB = message.requiredRAMMB;
     availableRAMMB = message.availableRAMMB;
     isModelLoaded = false;
+    
+    // Close the offscreen document when insufficient resources are detected
+    cleanupOffscreenDocument().then(() => {
+      // Start polling memory to check when resources become available
+      startMemoryPolling();
+    });
+    
     processQueue(); // Process queue to send error responses
     sendResponse({received: true});
     return true;
@@ -253,6 +307,51 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   
   return false;
 });
+
+/**
+ * Starts polling memory to check when sufficient resources become available
+ */
+function startMemoryPolling() {
+  console.log('ServiceWorker: Starting memory polling');
+  
+  // Clear any existing polling
+  if (memoryPollingTimer) {
+    clearInterval(memoryPollingTimer);
+  }
+  
+  memoryPollingTimer = setInterval(async () => {
+    try {
+      const memoryInfo = await chrome.system.memory.getInfo();
+      const currentAvailableRAMMB = Math.floor(memoryInfo.availableCapacity / (1024 * 1024));
+      
+      console.log(`ServiceWorker: Memory polling - Available: ${currentAvailableRAMMB}MB, Required: ${requiredRAMMB || 'unknown'}MB`);
+      
+      // If we have enough memory or no required RAM is specified, reset the insufficient resources flag
+      if (requiredRAMMB === null || currentAvailableRAMMB >= requiredRAMMB) {
+        console.log('ServiceWorker: Sufficient resources now available');
+        hasInsufficientResources = false;
+        stopMemoryPolling();
+        
+        // Try to process queue again if there are pending requests
+        if (requestsQueue.length > 0) {
+          processQueue();
+        }
+      }
+    } catch (error) {
+      console.error('ServiceWorker: Error during memory polling:', error);
+    }
+  }, MEMORY_POLLING_INTERVAL);
+}
+
+/**
+ * Stops the memory polling interval
+ */
+function stopMemoryPolling() {
+  if (memoryPollingTimer) {
+    clearInterval(memoryPollingTimer);
+    memoryPollingTimer = null;
+  }
+}
 
 // Set up port connection listener
 chrome.runtime.onConnect.addListener(function (port: chrome.runtime.Port): void {

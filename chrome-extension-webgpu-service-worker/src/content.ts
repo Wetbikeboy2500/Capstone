@@ -8,6 +8,7 @@ let badgeElements = new WeakSet<Element>();
 
 let lastRun: number = 0;
 let throttleTimer: number | null = null;
+let activePopup: HTMLElement | null = null;
 
 // Add message listener for cache clearing
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -56,6 +57,24 @@ function initializeObserver(): void {
     childList: true,
     subtree: true,
   });
+  
+  // Add global click event listener to handle popup closing
+  document.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement;
+    // Close popup if clicking outside of any badge
+    if (activePopup && !target.closest('.email-safety-badge')) {
+      closeActivePopup();
+    }
+  });
+}
+
+// Close any currently open popup
+function closeActivePopup(): void {
+  if (activePopup) {
+    document.body.classList.remove('email-safety-popup-open');
+    activePopup.classList.remove('popup-active');
+    activePopup = null;
+  }
 }
 
 async function handleEmailChanges(): Promise<void> {
@@ -92,7 +111,7 @@ async function handleEmailChanges(): Promise<void> {
 /**
  * Trims excessive whitespace from text content
  * - Replaces multiple spaces with a single space
- * - Replaces 3+ newlines with double newlines
+ * - Replaces 2+ newlines with double newlines
  * - Trims leading/trailing whitespace
  */
 function normalizeWhitespace(text: string): string {
@@ -100,9 +119,7 @@ function normalizeWhitespace(text: string): string {
 
   return text
     .replace(/[ \t]+/g, ' ') // Replace multiple spaces/tabs with single space
-    .replace(/\n{3,}/g, '\n\n') // Replace 3+ consecutive newlines with just 2
-    .replace(/[ \t]+\n/g, '\n') // Remove spaces before newlines
-    .replace(/\n[ \t]+/g, '\n') // Remove spaces after newlines
+    .replace(/(?:\s*\n){2,}\s*/g, '\n\n') // Replace 2+ newlines (with optional surrounding spaces) with double newline
     .trim(); // Remove leading/trailing whitespace
 }
 
@@ -128,7 +145,12 @@ function analyzeEmail(emailContent: EmailContent, container: HTMLElement, hash: 
 
   sendEmailContent(emailContent, (response: ResponseMessage) => {
     if (response.responseType === 'error') {
-      //error badge
+      const errorResult = newAnalysisResult({
+        brief_analysis: response.brief_analysis || 'Analysis failed',
+        type: 'error',
+        confidence: 0
+      });
+      displayBadge(container, errorResult);
       return;
     }
 
@@ -187,10 +209,71 @@ function addBadgeToEmail(container: HTMLElement, badge: HTMLElement): void {
       }
     }
   }
+
+  // Ensure proper event handling for the badge
+  setupBadgeInteractions(badge);
+}
+
+function setupBadgeInteractions(badge: HTMLElement): void {
+  // Add click handler for manual popup toggle
+  badge.addEventListener('click', (event) => {
+    event.stopPropagation();
+    
+    if (badge.classList.contains('popup-active')) {
+      closeActivePopup();
+    } else {
+      // Close any other active popup first
+      closeActivePopup();
+      
+      // Setup this popup as active
+      activePopup = badge;
+      badge.classList.add('popup-active');
+      document.body.classList.add('email-safety-popup-open');
+      
+      // Ensure popup is positioned correctly by forcing layout recalculation
+      const popup = badge.querySelector('.badge-info');
+      if (popup) {
+        // Force popup to appear and recalculate position
+        (popup as HTMLElement).style.display = 'flex';
+        
+        // Check if popup would go off-screen to the right
+        const popupRect = popup.getBoundingClientRect();
+        if (popupRect.right > window.innerWidth) {
+          (popup as HTMLElement).style.right = 'auto';
+          (popup as HTMLElement).style.left = `${Math.max(0, window.innerWidth - popupRect.width - 20)}px`;
+        }
+      }
+    }
+  });
+  
+  // Handle hover effects in addition to click
+  badge.addEventListener('mouseenter', () => {
+    // Add a class to the badge container that's being hovered
+    badge.parentElement?.classList.add('badge-container-hovered');
+    
+    // Force hardware acceleration for smoother animations
+    const popup = badge.querySelector('.badge-info') as HTMLElement;
+    if (popup) {
+      popup.style.transform = 'translateZ(0)';
+    }
+  });
+  
+  badge.addEventListener('mouseleave', () => {
+    // Only remove hover class if this isn't the active popup
+    if (badge !== activePopup) {
+      badge.parentElement?.classList.remove('badge-container-hovered');
+      
+      // Hide the popup when not active and mouse leaves
+      const popup = badge.querySelector('.badge-info') as HTMLElement;
+      if (popup) {
+        popup.style.display = 'none';
+      }
+    }
+  });
 }
 
 function addLoadingBadge(container: HTMLElement): void {
-  console.log('add loading badge')
+  console.log('add loading badge');
 
   const loadingBadge = document.createElement('div');
   loadingBadge.className = 'email-safety-badge loading';
@@ -245,6 +328,10 @@ function displayBadge(container: HTMLElement, result: AnalysisResult): void {
       icon = 'fa-dollar-sign';
       color = 'red';
       break;
+    case 'error':
+      icon = 'fa-times';
+      color = 'red';
+      break;
     default:
       console.error('Unknown email type:', result.type);
       icon = 'fa-question';
@@ -265,11 +352,13 @@ function displayBadge(container: HTMLElement, result: AnalysisResult): void {
   // Create badge info container
   const badgeInfo = document.createElement('div');
   badgeInfo.className = 'badge-info';
+  badgeInfo.setAttribute('role', 'tooltip');
+  badgeInfo.setAttribute('aria-hidden', 'true');
 
   // Add badge type
   const badgeType = document.createElement('span');
   badgeType.className = 'badge-type';
-  badgeType.textContent = result.type || 'Normal';
+  badgeType.textContent = result.type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'Normal';
   badgeInfo.appendChild(badgeType);
 
   // Add badge analysis
