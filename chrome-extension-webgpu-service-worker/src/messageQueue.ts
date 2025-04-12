@@ -1,3 +1,4 @@
+import { setTimeout } from 'timers';
 import { EmailContent, newRequestMessage, RequestMessage, ResponseMessage, SYSTEM_PROMPT } from './types';
 
 // Define type for port connection
@@ -40,10 +41,23 @@ function connectToServiceWorker() {
   });
 
   port.onDisconnect.addListener(() => {
-    console.log('Disconnected from service worker, attempting to reconnect...');
     port = null;
     isProcessingQueue = false; // Reset processing flag on disconnect
-    setTimeout(connectToServiceWorker, 1000);
+    
+    const attemptReconnect = () => {
+      console.log('Disconnected from service worker, attempting to reconnect...');
+      connectToServiceWorker();
+      
+      if (!port) {
+        setTimeout(attemptReconnect, 1000);
+      } else {
+        console.log('Successfully reconnected to service worker');
+        setTimeout(processNextQueueItem, 0);
+      }
+    };
+    
+    // Start reconnection process
+    attemptReconnect();
   });
 }
 

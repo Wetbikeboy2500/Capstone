@@ -36,7 +36,7 @@ export const SYSTEM_PROMPT = `Evaluate email security risks based on content ana
 INSTRUCTIONS:
 1. Review the email's subject, body, sender, and URLs
 2. Assess for potential security concerns
-3. Provide brief reasoning (1-50 chars)
+3. Provide brief reasoning (1-75 chars)
 4. Classify as one of: safe, spam, unknown_threat, malware, data_exfiltration, phishing, scam, or extortion
 5. Include confidence score (0-0.99)
 

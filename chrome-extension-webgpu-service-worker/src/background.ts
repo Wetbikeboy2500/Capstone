@@ -1,16 +1,20 @@
 import { newResponseMessage, RequestMessage } from './types';
 
-// Queue management
-const MAX_CONCURRENT_REQUESTS = 3;
-let activeRequestsCount = 0;
+// State management
+let isProcessing = false;
 let requestsQueue: { message: RequestMessage, port: chrome.runtime.Port }[] = [];
+let hasInsufficientResources = false;
+let requiredRAMMB: number | null = null;
+let availableRAMMB: number | null = null;
 
 // Offscreen document configuration
 const OFFSCREEN_DOCUMENT_PATH = 'offscreen.html';
 let isOffscreenDocumentReady = false;
 let isModelLoaded = false;
-let modelContextSize: number | null = null;
 let offscreenDocumentCreating = false;
+
+let cleanupTimer: NodeJS.Timeout | null = null;
+const CLEANUP_DELAY = 60000; // 1 minute
 
 /**
  * Checks if an offscreen document already exists
@@ -64,23 +68,40 @@ async function createOffscreenDocument() {
   offscreenDocumentCreating = false;
 }
 
+async function cleanupOffscreenDocument() {
+  if (await hasOffscreenDocument()) {
+    console.log('ServiceWorker: Cleaning up offscreen document due to inactivity');
+    await chrome.offscreen.closeDocument();
+    isOffscreenDocumentReady = false;
+    isModelLoaded = false;
+  }
+}
+
 // Process requests from queue
 function processQueue() {
-  if (requestsQueue.length === 0 || activeRequestsCount >= MAX_CONCURRENT_REQUESTS) {
+  if (cleanupTimer) {
+    clearTimeout(cleanupTimer);
+    cleanupTimer = null;
+  }
+
+  if (requestsQueue.length === 0) {
+    cleanupTimer = setTimeout(cleanupOffscreenDocument, CLEANUP_DELAY);
     return;
   }
   
-  while (activeRequestsCount < MAX_CONCURRENT_REQUESTS && requestsQueue.length > 0) {
-    const nextRequest = requestsQueue.shift();
-    if (nextRequest) {
-      activeRequestsCount++;
-      processRequest(nextRequest.message, nextRequest.port)
-        .finally(() => {
-          activeRequestsCount--;
-          // Try to process more requests
-          setTimeout(processQueue, 0);
-        });
-    }
+  if (isProcessing) {
+    return;
+  }
+  
+  const nextRequest = requestsQueue.shift();
+  if (nextRequest) {
+    isProcessing = true;
+    processRequest(nextRequest.message, nextRequest.port)
+      .finally(() => {
+        isProcessing = false;
+        // Try to process more requests
+        setTimeout(processQueue, 0);
+      });
   }
 }
 
@@ -89,22 +110,34 @@ async function processRequest(message: RequestMessage, port: chrome.runtime.Port
   try {
     console.log('ServiceWorker: Processing request', message.requestId);
     
+    // If we already know we have insufficient resources, immediately return error
+    if (hasInsufficientResources) {
+      sendInsufficientResourcesError(port, message.requestId);
+      return;
+    }
+
     // Ensure offscreen document is created
     if (!isOffscreenDocumentReady) {
       await createOffscreenDocument();
     }
     
-    // Wait for model to be loaded
-    if (!isModelLoaded) {
+    // Wait for model to be loaded or insufficient resources signal
+    if (!isModelLoaded && !hasInsufficientResources) {
       console.log('ServiceWorker: Waiting for model to load');
       await new Promise(resolve => {
         const checkModelLoaded = setInterval(() => {
-          if (isModelLoaded) {
+          if (isModelLoaded || hasInsufficientResources) {
             clearInterval(checkModelLoaded);
             resolve(null);
           }
         }, 100);
       });
+    }
+
+    // Check again after waiting in case status changed
+    if (hasInsufficientResources) {
+      sendInsufficientResourcesError(port, message.requestId);
+      return;
     }
     
     // Send the inference request to the offscreen document
@@ -128,6 +161,21 @@ async function processRequest(message: RequestMessage, port: chrome.runtime.Port
   }
 }
 
+function sendInsufficientResourcesError(port: chrome.runtime.Port, requestId: string) {
+  const memoryMessage = requiredRAMMB && availableRAMMB
+    ? `Required: ${requiredRAMMB}MB, Available: ${availableRAMMB}MB`
+    : 'Insufficient system memory';
+    
+  port.postMessage({
+    responseType: 'error',
+    error: `Insufficient system resources to run the model. ${memoryMessage}`,
+    requestId: requestId,
+    brief_analysis: 'Cannot process request due to insufficient system resources',
+    type: 'unknown_threat',
+    confidence: 0
+  });
+}
+
 function sendErrorResponse(port: chrome.runtime.Port, requestId: string, error: unknown) {
   console.error('ServiceWorker: Error processing message', error);
   port.postMessage({
@@ -140,25 +188,25 @@ function sendErrorResponse(port: chrome.runtime.Port, requestId: string, error: 
   });
 }
 
-// Create message handler for processing requests
-async function handleMessage(message: RequestMessage, port: chrome.runtime.Port): Promise<void> {
-  console.log('ServiceWorker: Received message', message);
-  
-  // Add to queue
-  requestsQueue.push({ message, port });
-  
-  // Try to process the queue
-  processQueue();
-}
-
 // Listen for messages from offscreen document
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'modelLoaded') {
     isModelLoaded = true;
-    modelContextSize = message.contextSize;
-    console.log('ServiceWorker: Model loaded with context size', modelContextSize);
+    hasInsufficientResources = false;
+    console.log('ServiceWorker: Model loaded');
     // Try processing queue now that model is ready
     processQueue();
+    sendResponse({received: true});
+    return true;
+  }
+
+  if (message.type === 'insufficientResources') {
+    console.error('ServiceWorker: Insufficient resources:', message);
+    hasInsufficientResources = true;
+    requiredRAMMB = message.requiredRAMMB;
+    availableRAMMB = message.availableRAMMB;
+    isModelLoaded = false;
+    processQueue(); // Process queue to send error responses
     sendResponse({received: true});
     return true;
   }
@@ -212,8 +260,8 @@ chrome.runtime.onConnect.addListener(function (port: chrome.runtime.Port): void 
   console.assert(port.name === "web_llm_service_worker");
   
   // Listen for messages
-  port.onMessage.addListener((message: RequestMessage) => handleMessage(message, port));
+  port.onMessage.addListener((message: RequestMessage) => {
+    requestsQueue.push({ message, port });
+    processQueue();
+  });
 });
-
-// Initialize offscreen document when service worker starts
-createOffscreenDocument();
