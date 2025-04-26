@@ -5,8 +5,7 @@ import "./popup.css";
 /***************** UI elements *****************/
 // Available models configuration
 const availableModels = [
-  { name: "Gemma 3 1B", id: "gemma-3-1b-it-q4f16_1-MLC" },
-  { name: "Gemma 3 4B", id: "gemma-3-4b-it-q4f16_1-MLC" },
+  { name: "Granite 3.2 2B it q8_0", id: "granite-3.2-2b-instruct-q8_0" },
 ];
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -18,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const option = document.createElement('option');
     option.value = model.id;
     option.text = model.name;
+    option.disabled = true;
     modelSelector.appendChild(option);
   });
 

@@ -31,9 +31,12 @@ export interface AnalysisResult {
 }
 
 // System prompt to include with requests
-export const SYSTEM_PROMPT = `Analyze email content (subject, body, sender, URLs) for security risks.
+export const SYSTEM_PROMPT = `Analyze the email content subject, body, sender, and URLs for security risks.
+Be careful to avoid both false positives and false negatives. 
+Classify as a threat like spam, phishing, malware, etc. only if there is credible evidence or clear indicators. 
+If evidence is weak or ambiguous, default to 'safe', but do not ignore credible warning signs.
 Output JSON containing:
-1. brief_analysis: Concise reason for classification (max 75 chars).
+1. brief_analysis: Concise reason for classification, only one sentence.
 2. type: One of 'safe', 'spam', 'unknown_threat', 'malware', 'data_exfiltration', 'phishing', 'scam', 'extortion'.
 3. confidence: Score from 0.00 to 0.99.
 

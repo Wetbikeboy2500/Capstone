@@ -15,7 +15,7 @@ root ::= "{" ws "\\"brief_analysis\\":" ws string "," ws "\\"type\\":" ws threat
 threat ::= "\\"safe\\"" | "\\"spam\\"" | "\\"unknown_threat\\"" | "\\"malware\\"" | "\\"data_exfiltration\\"" | "\\"phishing\\"" | "\\"scam\\"" | "\\"extortion\\"" 
 
 confidence ::= "0" | "0." [0-9]{1,2} | "1" | "1.0"
-string  ::= "\\"" ([^"\\\\] | "\\\\" ["\\\\bfnrt]){1,75} "\\""
+string  ::= "\\"" ([^"\\\\] | "\\\\" ["\\\\bfnrt]){1,150} "\\""
 ws      ::= [ \\t\\n]{0,2}
 `;
 
@@ -25,7 +25,9 @@ const CONFIG_PATHS = {
   'multi-thread/wllama.wasm': chrome.runtime.getURL('models/multi-thread/wllama.wasm'),
 };
 
-const gemma3_4b = chrome.runtime.getURL('models/gemma-3-4b-it-q4_0_s-00001-of-00003.gguf');
+// const gemma3_4b = chrome.runtime.getURL('models/gemma-3-4b-it-q4_0_s-00001-of-00003.gguf');
+const gemma3_4b = '';
+const granite3_2_2b = chrome.runtime.getURL('models/granite-3.2-2b-instruct-q8_0-00001-of-00006.gguf');
 
 const progressCallback = ({ loaded, total }: ProgressInput) => {
   // Ensure we have valid numbers to prevent null or NaN percentages
@@ -52,7 +54,7 @@ function getMemoryAlignedValue(value: number): number {
 /**
  * Determines optimal model parameters based on system resources
  */
-async function getOptimalModelConfig() {
+async function getOptimalModelConfigGemma4b() {
   // Set minimum memory requirements
   const baseModelSizeMB = 2989; // Base size of the 4b model in MB in memory
   const minContextSizeMB = 211; // Approximate memory needed for 2048 context size
@@ -92,14 +94,80 @@ async function getOptimalModelConfig() {
     
     // First apply memory alignment, then apply constraints
     const alignedCtx = getMemoryAlignedValue(calculatedCtx);
-    const constrainedCtx = Math.max(2048, Math.min(alignedCtx, 9984));
+    const constrainedCtx = Math.max(2048, Math.min(alignedCtx, 8960));
+
+    /*
+    n_batch - 1: 54 ms per token
+    n_batch - 2: 46ms per token
+    n_batch - 3: 45ms per token but keeps increasing
+    n_batch - 4: 41 and increased slowly to 45ms and still slow increase
+    n_batch - 8: 40-43 with steady increase into 50ms
+    n_batch - 18 (n_threads): 38-40ms with slow increase 
+    n_batch - 36 (n_threads * 2): 37ms with gradual increase
+    n_batch - 64: 43ms with gradual increase
+    */
     
     return {
       modelName: 'gemma-3-4b-it-qat-q4_0-gguf',
       modelUrl: gemma3_4b,
       n_threads: Math.max(2, Math.floor(cpuThreads * 0.75)),
       n_ctx: constrainedCtx,
-      n_batch: 256,
+      n_batch: Math.max(2, Math.floor(cpuThreads * 0.75)) * 2,
+    };
+  } catch (error) {
+    console.error('Error getting system info:', error);
+    throw error;
+  }
+}
+
+async function getOptimalModelConfigGranite2b() {
+  // Set minimum memory requirements
+  const baseModelSizeMB = 3348; // Base size of the 4b model in MB in memory
+  const minContextSizeMB = 107; // Approximate memory needed for 2048 context size
+  const safetyMarginMB = 265; // Safety margin for memory 
+  const totalRequiredMB = baseModelSizeMB + minContextSizeMB + safetyMarginMB;
+
+  try {
+    // Request system information from background script
+    const systemInfo = await chrome.runtime.sendMessage({ type: 'getSystemInfo' });
+    const availableRAMMB = systemInfo?.availableRAMMB || 4096;
+    const totalRAMMB = systemInfo?.totalRAMMB || 8192;
+    const cpuThreads = systemInfo?.hardwareConcurrency || systemInfo?.cpuThreads || 4;
+
+    console.log(
+      `System resources: ${cpuThreads} CPU threads, ${(availableRAMMB / 1024).toFixed(1)}GB available RAM of ${(
+        totalRAMMB / 1024
+      ).toFixed(1)}GB total`
+    );
+
+    // Check if we have enough memory to run the model
+    if (availableRAMMB < totalRequiredMB) {
+      console.error(`Insufficient memory: need ${totalRequiredMB}MB but only have ${availableRAMMB}MB available`);
+      // Notify background script of insufficient resources
+      await chrome.runtime.sendMessage({
+        type: 'insufficientResources',
+        requiredRAMMB: totalRequiredMB,
+        availableRAMMB: availableRAMMB
+      });
+      return null;
+    }
+
+    // Calculate context size based on available RAM with fallback values
+    const tokenMemoryCostMB = 0.0522; // Approximate memory per token in MB
+    
+    // Calculate raw context size
+    const calculatedCtx = Math.floor(((availableRAMMB - safetyMarginMB) - baseModelSizeMB) / tokenMemoryCostMB);
+    
+    // First apply memory alignment, then apply constraints
+    const alignedCtx = getMemoryAlignedValue(calculatedCtx);
+    const constrainedCtx = Math.max(2048, Math.min(alignedCtx, 8192));
+    
+    return {
+      modelName: 'granite-3.2-2b-instruct-q8_0',
+      modelUrl: granite3_2_2b,
+      n_threads: Math.max(2, Math.floor(cpuThreads * 0.625)),
+      n_ctx: constrainedCtx,
+      n_batch: Math.max(2, Math.floor(cpuThreads * 0.625)) * 2,
     };
   } catch (error) {
     console.error('Error getting system info:', error);
@@ -125,16 +193,10 @@ async function initializeWllama(): Promise<void> {
         wllama = new Wllama(CONFIG_PATHS, {
           allowOffline: true,
           parallelDownloads: 6,
-          logger: {
-            debug: (msg: string) => console.log('Offscreen: Wllama debug:', msg),
-            log: (msg: string) => console.log('Offscreen: Wllama info:', msg),
-            warn: (msg: string) => console.warn('Offscreen: Wllama warn:', msg),
-            error: (msg: string) => console.error('Offscreen: Wllama error:', msg),
-          }
         });
 
         // Get optimal model configuration
-        const modelConfig = await getOptimalModelConfig();
+        const modelConfig = await getOptimalModelConfigGranite2b();
         
         // If modelConfig is null, we have insufficient resources
         if (!modelConfig) {
@@ -154,7 +216,7 @@ async function initializeWllama(): Promise<void> {
           n_threads: modelConfig.n_threads,
           n_ctx: modelConfig.n_ctx,
           n_batch: modelConfig.n_batch,
-          cache_type_k: 'q8_0',
+          cache_type_k: 'q4_0',
           progressCallback,
         });
         
@@ -218,11 +280,11 @@ async function processInference(request: RequestMessage): Promise<any> {
       // Check if input is likely to exceed context window
       const contextSize = currentModelConfig?.n_ctx || 4096;
       const tokens = await getTokenCount(request.prompt);
-      const remainingTokens = contextSize - tokensToKeepForSystemPrompt;
+      const remainingTokens = contextSize - tokens;
 
       console.log(`Offscreen: Token count for input: ${tokens}`, `Remaining tokens for context: ${remainingTokens}`);
 
-      if (remainingTokens <= 50) {
+      if (remainingTokens <= 60) {
         return {
           brief_analysis:
             'The input text is too long to process reliably within the available context window. Unable to provide accurate threat assessment.',
@@ -245,7 +307,7 @@ async function processInference(request: RequestMessage): Promise<any> {
         prompt,
         {
           sampling: {
-            temp: 1.0,
+            temp: 0.6,
             top_k: 64,
             top_p: 0.95,
             min_p: 0.01,
@@ -254,9 +316,6 @@ async function processInference(request: RequestMessage): Promise<any> {
           useCache: true,
         }
       );
-
-      //Keep the main system prompt. This is not exact and just removes some of the looping needed by wllama
-      wllama.kvRemove(tokensToKeepForSystemPrompt, -1);
 
       console.log('Offscreen: Inference completed', completion);
       getTokenCount(completion)
